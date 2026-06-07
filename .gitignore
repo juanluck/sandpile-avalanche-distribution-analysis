@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv
+venv/
+env/
+.conda/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Data files: add these later manually if desired
+data/**/*.dat
+data/**/*.csv
+data/**/*.txt
+!data/**/.gitkeep
+!data/**/README.md
+
+# Generated results
+distribution_results/**
+truncated_powerlaw_full_range_results/**
+truncated_powerlaw_examples/**
+!distribution_results/**/.gitkeep
+!truncated_powerlaw_full_range_results/**/.gitkeep
+!truncated_powerlaw_examples/**/.gitkeep
+
+# Logs
+*.log
