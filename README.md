@@ -12,23 +12,6 @@ The repository contains Python scripts used to:
 
 The data are **included** in this repository but should be substituted by those of your experiments.
 
-## Suggested repository name
-
-Recommended name:
-
-```text
-sandpile-robustness-rewiring
-```
-
-Other possible names:
-
-```text
-btw-sandpile-robustness
-sandpile-node-failure-analysis
-rewired-sandpile-degradation
-soc-sandpile-robustness
-```
-
 ## Expected data layout
 
 The scripts expect avalanche-duration frequency files with two columns:
