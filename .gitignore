@@ -24,12 +24,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Data files: add these later manually if desired
-data/**/*.dat
-data/**/*.csv
-data/**/*.txt
-!data/**/.gitkeep
-!data/**/README.md
 
 # Generated results
 distribution_results/**
