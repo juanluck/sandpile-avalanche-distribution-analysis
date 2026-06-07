@@ -10,7 +10,7 @@ The repository contains Python scripts used to:
 4. fit full-range truncated power laws;
 5. regenerate figures directly from generated CSV files.
 
-The data are **not included** in this repository. They should be added separately.
+The data are **included** in this repository but should be substituted by those of your experiments.
 
 ## Suggested repository name
 
