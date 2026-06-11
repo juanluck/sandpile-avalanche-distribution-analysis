@@ -1,3 +1,14 @@
+"""
+Generate visualization figures for distribution model selection results.
+Reads CSV data containing the best-fitting distributions across experiments,
+aggregates distribution winning frequencies (optionally in degradation level bins),
+and plots:
+  - Combined stacked bar charts grouped by rewiring rate.
+  - Individual stacked bar charts for each rewiring rate.
+  - Line plots representing winning frequencies for rewiring rates or distributions.
+  - A modal winner scatter plot showing the dominant distribution at each d and r.
+"""
+
 from pathlib import Path
 
 import numpy as np
@@ -9,14 +20,20 @@ import matplotlib.pyplot as plt
 # CONFIGURATION
 # ============================================================
 
+# Primary input file path
 INPUT_CSV = "./distribution_results/all_experiments/best_distributions_all.csv"
+# Fallback input file path if primary is missing
 FALLBACK_INPUT_CSV = "./distribution_results/all_experiments/best_distributions_by_file.csv"
 
+# Directory where output plots will be saved
 OUTPUT_DIR = Path("./distribution_results/all_experiments/model_selection_figures")
 
+# Rewiring values (percentages) to analyze
 R_VALUES = [0, 10]
+# Degradation values (percentage of nodes removed) to analyze
 D_VALUES = list(range(0, 76))
 
+# Set of candidate probability distributions
 DISTRIBUTIONS = [
     "power_law",
     "lognormal",
@@ -26,6 +43,7 @@ DISTRIBUTIONS = [
     "lognormal_positive",
 ]
 
+# Mapping distribution names to user-friendly labels for figure legends
 DISTRIBUTION_LABELS = {
     "power_law": "Power law",
     "lognormal": "Lognormal",
@@ -35,6 +53,7 @@ DISTRIBUTION_LABELS = {
     "lognormal_positive": "Positive lognormal",
 }
 
+# Explicit color scheme for distributions to ensure consistency across plots
 DISTRIBUTION_COLORS = {
     "lognormal": "#1f77b4",
     "truncated_power_law": "#ff7f0e",
@@ -44,6 +63,7 @@ DISTRIBUTION_COLORS = {
     "lognormal_positive": "#8c564b",
 }
 
+# Color mapping representing each rewiring rate
 REWIRING_COLORS = {
     0: "red",
     10: "blue",
@@ -55,6 +75,20 @@ REWIRING_COLORS = {
 # ============================================================
 
 def get_input_csv() -> str:
+    """
+    Locate the input CSV file. Prefers the primary path, but falls back
+    to the alternative file if needed.
+
+    Returns
+    -------
+    str
+        Path to the available CSV file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If neither file is found.
+    """
     if Path(INPUT_CSV).exists():
         return INPUT_CSV
 
@@ -70,11 +104,31 @@ def get_input_csv() -> str:
 
 
 def normalize_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardize the shorthand column names to 'd' and 'r' in the DataFrame.
+
+    Parameters
+    ----------
+    dataframe : pd.DataFrame
+        Input DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with standardized columns.
+
+    Raises
+    ------
+    ValueError
+        If required columns are missing after normalization.
+    """
     dataframe = dataframe.copy()
 
+    # Map 'degradation' column to 'd'
     if "degradation" in dataframe.columns and "d" not in dataframe.columns:
         dataframe = dataframe.rename(columns={"degradation": "d"})
 
+    # Map 'rewiring' column to 'r'
     if "rewiring" in dataframe.columns and "r" not in dataframe.columns:
         dataframe = dataframe.rename(columns={"rewiring": "r"})
 
@@ -91,20 +145,39 @@ def normalize_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_summary(input_csv: str) -> pd.DataFrame:
+    """
+    Read the model selection output, filter data by configured r and d limits,
+    and calculate winning frequencies (percentages) for each distribution
+    grouped by degradation level and rewiring rate.
+
+    Parameters
+    ----------
+    input_csv : str
+        Path to the model selection CSV.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame listing winning distribution percentages per (d, r).
+    """
     dataframe = pd.read_csv(input_csv)
     dataframe = normalize_columns(dataframe)
 
+    # Apply configuration filters
     dataframe = dataframe[dataframe["r"].isin(R_VALUES)]
     dataframe = dataframe[dataframe["d"].isin(D_VALUES)]
 
+    # Calculate total runs per degradation and rewiring level
     totals = dataframe.groupby(["d", "r"]).size().reset_index(name="total")
 
+    # Count wins per distribution, degradation, and rewiring level
     counts = (
         dataframe.groupby(["d", "r", "best_distribution"])
         .size()
         .reset_index(name="count")
     )
 
+    # Reindex to ensure all permutations are represented (filling missing counts with 0)
     full_index = pd.MultiIndex.from_product(
         [D_VALUES, R_VALUES, DISTRIBUTIONS],
         names=["d", "r", "best_distribution"],
@@ -116,6 +189,7 @@ def build_summary(input_csv: str) -> pd.DataFrame:
         .reset_index()
     )
 
+    # Compute percentage frequency for each distribution
     summary = counts.merge(totals, on=["d", "r"], how="left")
     summary = summary.dropna(subset=["total"])
 
@@ -124,10 +198,26 @@ def build_summary(input_csv: str) -> pd.DataFrame:
 
 
 def bin_summary(summary: pd.DataFrame, bin_width: int) -> pd.DataFrame:
+    """
+    Group degradation values ('d') into larger bins to smooth plotting results.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        The un-binned summary DataFrame.
+    bin_width : int
+        Width of the degradation bins. If <= 1, no binning is done.
+
+    Returns
+    -------
+    pd.DataFrame
+        Binned DataFrame with averaged percentages.
+    """
     if bin_width <= 1:
         return summary.copy()
 
     data = summary.copy()
+    # Compute the bin start value for each degradation level
     data["d_bin"] = (data["d"] // bin_width) * bin_width
 
     return (
@@ -143,9 +233,28 @@ def make_pivot_for_rewiring(
     rewiring_value: int,
     bin_width: int = 1,
 ) -> pd.DataFrame:
+    """
+    Reshape the summary DataFrame into a pivot table (degradation 'd' as rows,
+    distributions as columns, percentage as values) for a specific rewiring rate.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Summary DataFrame.
+    rewiring_value : int
+        Rewiring rate to pivot.
+    bin_width : int
+        Bin size to group degradation values.
+
+    Returns
+    -------
+    pd.DataFrame
+        Pivoted DataFrame containing only distributions that won at least once.
+    """
     data = bin_summary(summary, bin_width=bin_width)
     subset = data[data["r"] == rewiring_value].copy()
 
+    # Pivot to form matrix of degradation vs distribution percentages
     pivot = (
         subset.pivot_table(
             index="d",
@@ -156,7 +265,9 @@ def make_pivot_for_rewiring(
         .sort_index()
     )
 
+    # Ensure all configured distributions are columns
     pivot = pivot.reindex(columns=DISTRIBUTIONS, fill_value=0.0)
+    # Exclude distributions that have 0% win rate across all degradation levels
     return pivot.loc[:, (pivot > 0).any(axis=0)]
 
 
@@ -165,20 +276,44 @@ def make_pivot_for_rewiring(
 # ============================================================
 
 def save_figure(figure, output_file: Path):
+    """
+    Helper function to create output folders and save a figure as PNG and PDF.
+
+    Parameters
+    ----------
+    figure : matplotlib.figure.Figure
+        Figure instance to save.
+    output_file : Path
+        Target filename path (expected to end in .png).
+    """
     output_file.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_file, dpi=300, bbox_inches="tight")
     figure.savefig(output_file.with_suffix(".pdf"), bbox_inches="tight")
 
 
 def draw_stacked_bars(axis, pivot: pd.DataFrame, bar_width: float = 1.0):
+    """
+    Draw a stacked bar chart onto the specified axes.
+
+    Parameters
+    ----------
+    axis : matplotlib.axes.Axes
+        Plot axis.
+    pivot : pd.DataFrame
+        Pivoted DataFrame containing percentage distributions.
+    bar_width : float
+        Width of the bars.
+    """
     x_positions = np.arange(len(pivot.index))
     bottom = np.zeros(len(pivot.index))
 
+    # Iterate through distributions and stack their frequencies
     for distribution in pivot.columns:
         values = pivot[distribution].to_numpy()
         color = DISTRIBUTION_COLORS.get(distribution, None)
         label = DISTRIBUTION_LABELS.get(distribution, distribution)
 
+        # Plot bars for the current distribution
         bars = axis.bar(
             x_positions,
             values,
@@ -192,6 +327,7 @@ def draw_stacked_bars(axis, pivot: pd.DataFrame, bar_width: float = 1.0):
             antialiased=False,
         )
 
+        # Disable antialiasing on bars to avoid sub-pixel rendering gaps
         for bar in bars:
             bar.set_antialiased(False)
 
@@ -199,6 +335,16 @@ def draw_stacked_bars(axis, pivot: pd.DataFrame, bar_width: float = 1.0):
 
 
 def set_degradation_ticks(axis, degradation_values):
+    """
+    Format x-axis tick positions and labels for degradation values.
+
+    Parameters
+    ----------
+    axis : matplotlib.axes.Axes
+        Plot axis.
+    degradation_values : list
+        List of degradation levels mapped to the bar index.
+    """
     tick_positions = [
         index for index, value in enumerate(degradation_values) if value % 10 == 0
     ]
@@ -208,6 +354,23 @@ def set_degradation_ticks(axis, degradation_values):
 
 
 def unique_legend(handles, labels):
+    """
+    Filter legend handles and labels to remove duplicate entries.
+
+    Parameters
+    ----------
+    handles : list
+        Legend handles.
+    labels : list
+        Legend labels.
+
+    Returns
+    -------
+    unique_handles : list
+        Unique legend handles.
+    unique_labels : list
+        Unique legend labels.
+    """
     seen = set()
     unique_handles = []
     unique_labels = []
@@ -230,6 +393,19 @@ def plot_stacked_bars_combined_by_rewiring(
     output_dir: Path,
     bin_width: int = 5,
 ):
+    """
+    Plot combined stacked bar charts on a single grid with shared x and y axes,
+    separated vertically by rewiring rate.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Winning distribution summary DataFrame.
+    output_dir : Path
+        Base output directory.
+    bin_width : int
+        Degradation bin width.
+    """
     figure_dir = output_dir / "stacked_bars_combined_by_rewiring"
     figure_dir.mkdir(parents=True, exist_ok=True)
 
@@ -248,6 +424,7 @@ def plot_stacked_bars_combined_by_rewiring(
 
     last_pivot = None
 
+    # Draw stacked bar charts for each rewiring value
     for axis, rewiring_value in zip(axes, available_r_values):
         pivot = make_pivot_for_rewiring(summary, rewiring_value, bin_width)
 
@@ -267,6 +444,7 @@ def plot_stacked_bars_combined_by_rewiring(
         set_degradation_ticks(axes[-1], list(last_pivot.index))
         axes[-1].set_xlabel("Nodes removed (%)")
 
+    # Add shared legend at the top of the combined figure
     handles, labels = axes[0].get_legend_handles_labels()
     handles, labels = unique_legend(handles, labels)
 
@@ -293,6 +471,18 @@ def plot_stacked_bars_by_rewiring(
     output_dir: Path,
     bin_width: int = 1,
 ):
+    """
+    Plot and save individual stacked bar charts for each rewiring rate.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Winning distribution summary DataFrame.
+    output_dir : Path
+        Base output directory.
+    bin_width : int
+        Degradation bin width.
+    """
     figure_dir = output_dir / "stacked_bars_by_rewiring"
     figure_dir.mkdir(parents=True, exist_ok=True)
 
@@ -333,6 +523,17 @@ def plot_stacked_bars_by_rewiring(
 
 
 def plot_lines_by_rewiring(summary: pd.DataFrame, output_dir: Path):
+    """
+    Plot winning frequencies of different distributions as line plots over degradation levels
+    for each individual rewiring rate.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Winning distribution summary DataFrame.
+    output_dir : Path
+        Base output directory.
+    """
     figure_dir = output_dir / "lines_by_rewiring"
     figure_dir.mkdir(parents=True, exist_ok=True)
 
@@ -375,6 +576,17 @@ def plot_lines_by_rewiring(summary: pd.DataFrame, output_dir: Path):
 
 
 def plot_lines_by_distribution(summary: pd.DataFrame, output_dir: Path):
+    """
+    Plot line plots showing the winning frequency evolution of each candidate distribution,
+    comparing different rewiring rates.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Winning distribution summary DataFrame.
+    output_dir : Path
+        Base output directory.
+    """
     figure_dir = output_dir / "lines_by_distribution"
     figure_dir.mkdir(parents=True, exist_ok=True)
 
@@ -417,20 +629,34 @@ def plot_lines_by_distribution(summary: pd.DataFrame, output_dir: Path):
 
 
 def plot_modal_winner_map(summary: pd.DataFrame, output_dir: Path):
+    """
+    Create a scatter plot matrix showing the modal winning distribution (most frequent winner)
+    for each degradation and rewiring parameter pair. Point sizes represent the win percentage.
+
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Winning distribution summary DataFrame.
+    output_dir : Path
+        Base output directory.
+    """
     figure_dir = output_dir / "modal_winner_map"
     figure_dir.mkdir(parents=True, exist_ok=True)
 
+    # Retrieve the row with the maximum win percentage for each (d, r) configuration
     idx = summary.groupby(["d", "r"])["percentage"].idxmax()
     modal = summary.loc[idx].copy().sort_values(["r", "d"])
 
     figure, axis = plt.subplots(figsize=(11, 4.8))
 
+    # Scatter plot for each distribution group
     for distribution in DISTRIBUTIONS:
         subset = modal[modal["best_distribution"] == distribution]
 
         if subset.empty:
             continue
 
+        # Point size scales with the win percentage of the modal distribution
         sizes = 100 + 500 * subset["percentage"] / 100.0
 
         axis.scatter(
@@ -444,6 +670,7 @@ def plot_modal_winner_map(summary: pd.DataFrame, output_dir: Path):
             color=DISTRIBUTION_COLORS.get(distribution, None),
         )
 
+    # Label points with their winning percentage
     for _, row in modal.iterrows():
         axis.text(row["d"], row["r"], f"{row['percentage']:.0f}%", ha="center", va="center", fontsize=8)
 
@@ -469,22 +696,31 @@ def plot_modal_winner_map(summary: pd.DataFrame, output_dir: Path):
 # ============================================================
 
 def main():
+    """
+    Main driver execution. Sets up folders, reads data, aggregates, and draws all figures.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     input_csv = get_input_csv()
     summary = build_summary(input_csv)
 
+    # Save summary table to CSV for reference
     summary_file = OUTPUT_DIR / "distribution_winning_percentages.csv"
     summary.to_csv(summary_file, index=False)
 
+    # Combined stacked bar charts (binned at 5% and 1%)
     plot_stacked_bars_combined_by_rewiring(summary, OUTPUT_DIR, bin_width=5)
     plot_stacked_bars_combined_by_rewiring(summary, OUTPUT_DIR, bin_width=1)
 
+    # Separate stacked bar charts by rewiring (binned at 5% and 1%)
     plot_stacked_bars_by_rewiring(summary, OUTPUT_DIR, bin_width=5)
     plot_stacked_bars_by_rewiring(summary, OUTPUT_DIR, bin_width=1)
 
+    # Frequency evolution line plots
     plot_lines_by_rewiring(summary, OUTPUT_DIR)
     plot_lines_by_distribution(summary, OUTPUT_DIR)
+    
+    # Modal best-fit distribution grid map
     plot_modal_winner_map(summary, OUTPUT_DIR)
 
     print("Analysis completed.")
